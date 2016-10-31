@@ -1,55 +1,17 @@
-var path = require('path');
-
 var gulp = require('gulp');
-var through2 = require('through2');
+var plugins = require('gulp-load-plugins')();
 
-var getFileDeps = require('./utils/getFileDeps');
+var hasChanged = require('./src/hasChanged');
+var changed = require('./src/changed');
 
 var paths = {
-    files: ['src/views/**/*.*', 'src/css/**/*.*'],
+    input: 'demo/input/css/**/*.*',
+    output: 'demo/output/css',
 };
 
 gulp.task('default', function () {
-    gulp.src(paths.files)
-        .pipe(deps());
+    gulp.src(paths.input)
+        .pipe(changed(paths.output))
+        // .pipe(plugins.changed(paths.output, { hasChanged: hasChanged() }))
+        .pipe(gulp.dest(paths.output));
 });
-
-function deps() {
-    var map;
-
-    function bufferContents(file, unused, done) {
-        if (file.isNull()) {
-            done();
-            return;
-        }
-
-        if (file.isStream()) {
-            done();
-            return;
-        }
-
-        var deps = getFileDeps(file);
-
-        if (!map) {
-            map = {};
-        }
-
-        if (deps && deps.length) {
-            map[file.path] = deps;
-        }
-
-        done();
-    }
-
-    function endStream(done) {
-        if (!map) {
-            done();
-            return;
-        }
-
-        console.log(map); // eslint-disable-line no-console
-        done();
-    }
-
-    return through2.obj(bufferContents, endStream)
-}
