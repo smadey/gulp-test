@@ -19,9 +19,8 @@ var allGetContentsDeps = {
     scss: function (contents) {
         contents = contents.replace(REG_SCSS_COMMENTS, ''); // 移除注释
 
-        var matched;
-
         var deps = [];
+        var matched;
 
         while ((matched = REG_SCSS_IMPORT.exec(contents)) !== null) {
             deps.push(matched[1]);
@@ -34,9 +33,8 @@ var allGetContentsDeps = {
     nunjucks: function (contents) {
         contents = contents.replace(REG_NUNJUCKS_COMMENTS, ''); // 移除注释
 
-        var matched;
-
         var deps = [];
+        var matched;
 
         while ((matched = REG_NUNJUCKS_EXTENDS.exec(contents)) !== null) {
             deps.push(matched[1]);
@@ -47,14 +45,36 @@ var allGetContentsDeps = {
 };
 
 /**
- * [exports description]
+ * 获取文件与其依赖文件最后修改时间最大值
+ * @param {Object} fileObj 文件对象
+ * @param {File} fileObj.File 文件实例
+ * @param {Object<path: fileObj>} fileObj.deps 依赖文件
+ * @return {Date} 最后修改时间
+ */
+function getLastModified(fileObj) {
+    var lastModified = fileObj.File.stat ? fileObj.File.stat.mtime : 0;
+
+    Object.keys(fileObj.deps).forEach(function (depFilePath) {
+        var depLastModified = getLastModified(fileObj.deps[depFilePath]);
+
+        if (lastModified < depLastModified) {
+            lastModified = depLastModified;
+        }
+    });
+
+    return lastModified;
+}
+
+/**
+ * 筛选出将要更新文件
  * @param {String|Function} dest 匹配路径
  * @param {Object} options 配置项
  * @param {String} options.cwd 工作目录
- * @param {String} options.extension 匹配文件的后缀名
- * @param {Function} options.getContentsDeps 获取文件依赖方法
- * @param {String} options.syntax 文件语法
+ * @param {Boolean} options.underscore 是否包含(不过滤)以"_"开头的文件
+ * @param {String} options.extension 对比文件的后缀名
  * @param {String} options.base 依赖文件定位目录
+ * @param {Function} options.getContentsDeps 根据内容获取依赖文件方法
+ * @param {String} options.syntax 文件语法
  * @return {DestroyableTransform} 文件流
  */
 module.exports = function (dest, options) {
@@ -72,7 +92,7 @@ module.exports = function (dest, options) {
     options = options || {};
     options.cwd = options.cwd || process.cwd();
 
-    var files = {};
+    var fileObjs = {};
 
     /**
      * 获取文件的依赖文件
@@ -85,7 +105,7 @@ module.exports = function (dest, options) {
 
         var ext = extname.slice(1).toLowerCase();
 
-        var getContentsDeps = options.getContentsDeps || allGetContentsDeps[options.syntax] || allGetContentsDeps[ext];
+        var getContentsDeps = options.getContentsDeps || allGetContentsDeps[options] || allGetContentsDeps[ext];
 
         if (!getContentsDeps) {
             return [];
@@ -105,105 +125,57 @@ module.exports = function (dest, options) {
         });
     }
 
-    /**
-     * 获取文件的所有依赖文件
-     * @param {File} file 文件对象
-     * @return {Array<File>} 依赖文件数组(由文件对象组成数组)
-     */
-    function getAllDepFiles(file) {
-        var depFiles = [];
+    // 文件对象组装
+    function transform(file, encoding, callback) {
+        var fileObj = fileObjs[file.path] || (fileObjs[file.path] = {});
 
-        file._deps.forEach(function (dep) {
-            var depFile = files[dep];
-            if (depFile && depFiles.indexOf(depFile) < 0) {
-                depFiles.push(depFile);
+        fileObj.File = file;
+        fileObj.deps = {};
 
-                getAllDepFiles(depFile).forEach(function (d) {
-                    if (depFiles.indexOf(d) < 0) {
-                        depFiles.push(d);
-                    }
-                });
-            }
+        getFileDeps(file).forEach(function (depFilePath) {
+            fileObj.deps[depFilePath] = fileObjs[depFilePath] || (fileObjs[depFilePath] = {});
         });
 
-        return depFiles;
-    }
-
-    /**
-     * 判断文件是否更改
-     * @param {File} file 文件对象
-     * @return {Boolean} 文件是否更改
-     */
-    function isFileChanged(file) {
         var targetPath = path.resolve(options.cwd, dest(file), file.relative);
 
         if (options.extension) {
             targetPath = gutil.replaceExtension(targetPath, options.extension);
         }
 
-        try {
-            var targetStat = fs.statSync(targetPath);
-
-            if (file.stat && file.stat.mtime > targetStat.mtime) {
-                return true;
+        fs.stat(targetPath, function (err, targetStat) {
+            if (err) {
+                fileObj.isNew = true;
+            } else {
+                fileObj.targetLastModified = targetStat.mtime;
             }
 
-            return false;
-        } catch (ex) {
-            return true;
-        }
+            callback();
+        });
     }
 
-    // 绑定文件的依赖
-    function transform(file, encoding, callback) {
-        file._deps = getFileDeps(file, options);
-        files[file.path] = file;
-        callback();
-    }
-
-    // 检测出所有要被更新的文件
+    // 提取需要更新文件
     function flush(callback) {
         var stream = this;
 
-        function onFileChange(file) {
-            file._changed = true;
-            stream.push(file);
-            gutil.log('文件 "' + file.path + '" 将被更改');
-        }
+        Object.keys(fileObjs).forEach(function (filePath) {
+            var fileObj = fileObjs[filePath];
 
-        Object.keys(files).map(function (key) {
-            var file = files[key];
-
-            console.log(file.path.split('/').pop(), getAllDepFiles(file).map(d => d.path.split('/').pop())); // eslint-disable-line no-console
-
-            if (file._changed !== undefined) {
-                return;
-            }
-
-            if (file._changed = isFileChanged(file)) {
-                onFileChange(file);
-            } else {
-                var allDepFiles = getAllDepFiles(file);
-                var depFile;
-
-                for (var i = 0, n = allDepFiles.length; i < n; i++) {
-                    depFile = allDepFiles[i];
-
-                    if (depFile._changed === false) {
-                        continue;
-                    } else if (depFile._changed === true) {
-                        onFileChange(file);
-                        break;
-                    } else if (depFile._changed = isFileChanged(depFile)) {
-                        onFileChange(depFile);
-                        onFileChange(file);
-                    }
+            if (fileObj.isNew) {
+                if (options.underscore || path.basename(filePath).indexOf('_') !== 0) {
+                    stream.push(fileObj.File);
+                    gutil.log('文件 "' + filePath + '" 将被更改');
                 }
+            } else if (getLastModified(fileObj) > fileObj.targetLastModified) {
+                stream.push(fileObj.File);
+                gutil.log('文件 "' + filePath + '" 将被更改');
             }
         });
 
+        fileObjs = null;
         callback();
     }
 
     return through2.obj(transform, flush);
 };
+
+module.exports.allGetContentsDeps = allGetContentsDeps;

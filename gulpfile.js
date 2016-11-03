@@ -21,7 +21,7 @@ gulp.task('css', function () {
 
 gulp.task('views', function () {
     return gulp.src(paths.views.input)
-        .pipe(beingChanged(paths.views.output))
+        .pipe(beingChanged(paths.views.output, { underscore: true }))
         .pipe(gulp.dest(paths.views.output));
 });
 
@@ -29,7 +29,3 @@ gulp.task('default', ['css', 'views'], function () {
     gulp.watch(paths.css.input, ['css']);
     gulp.watch(paths.views.input, ['views']);
 });
-
-// gulp.task('default', ['css'], function () {
-//     gulp.watch(paths.css.input, ['css']);
-// });
