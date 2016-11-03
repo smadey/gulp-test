@@ -1,17 +1,35 @@
 var gulp = require('gulp');
-var plugins = require('gulp-load-plugins')();
 
-var hasChanged = require('./src/hasChanged');
-var changed = require('./src/changed');
+var beingChanged = require('./index');
 
 var paths = {
-    input: 'demo/input/css/**/*.*',
-    output: 'demo/output/css',
+    css: {
+        input: 'demo/input/css/**/*.*',
+        output: 'demo/output/css',
+    },
+    views: {
+        input: 'demo/input/views/**/*.*',
+        output: 'demo/output/views',
+    },
 };
 
-gulp.task('default', function () {
-    gulp.src(paths.input)
-        .pipe(changed(paths.output))
-        // .pipe(plugins.changed(paths.output, { hasChanged: hasChanged() }))
-        .pipe(gulp.dest(paths.output));
+gulp.task('css', function () {
+    return gulp.src(paths.css.input)
+        .pipe(beingChanged(paths.css.output))
+        .pipe(gulp.dest(paths.css.output));
 });
+
+gulp.task('views', function () {
+    return gulp.src(paths.views.input)
+        .pipe(beingChanged(paths.views.output))
+        .pipe(gulp.dest(paths.views.output));
+});
+
+gulp.task('default', ['css', 'views'], function () {
+    gulp.watch(paths.css.input, ['css']);
+    gulp.watch(paths.views.input, ['views']);
+});
+
+// gulp.task('default', ['css'], function () {
+//     gulp.watch(paths.css.input, ['css']);
+// });
