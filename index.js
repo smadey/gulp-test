@@ -1,18 +1,14 @@
-require('es6-promise').polyfill();
-
 var fs = require('fs');
 var path = require('path');
 
 var gutil = require('gulp-util');
 var through2 = require('through2');
 
-var path = require('path');
+var REG_SCSS_COMMENTS = /\/\*[\s\S]*?\*\/|\/\/.*(?=[\n\r])/g;
+var REG_SCSS_DEPS = /@import\s*["']([^"']+)["'];?/g;
 
-var REG_SCSS_IMPORT = /\@import\s*["']([^"']+)["'];?/g;
-var REG_SCSS_COMMENTS = /\/\[\s\S]*\*\/|\/\/.*(?=[\n\r])/g;
-
-var REG_NUNJUCKS_EXTENDS = /{%\s*extends\s*["']([^"']+)["'];?\s*%}/g;
-var REG_NUNJUCKS_COMMENTS = /{#[\s\S]*#}/g;
+var REG_NUNJUCKS_COMMENTS = /{#[\s\S]*?#}/g;
+var REG_NUNJUCKS_DEPS = /{%\s*(?:extends|import)\s*["']([^"']+)["'][^%]*%}/g;
 
 var allGetContentsDeps = {
     // scss文件处理
@@ -22,7 +18,8 @@ var allGetContentsDeps = {
         var deps = [];
         var matched;
 
-        while ((matched = REG_SCSS_IMPORT.exec(contents)) !== null) {
+        /* eslint-disable no-cond-assign */
+        while ((matched = REG_SCSS_DEPS.exec(contents)) !== null) {
             deps.push(matched[1]);
         }
 
@@ -30,14 +27,19 @@ var allGetContentsDeps = {
     },
 
     // nunjucks文件处理
-    nunjucks: function (contents) {
+    nunjucks: function (contents, fpath) {
         contents = contents.replace(REG_NUNJUCKS_COMMENTS, ''); // 移除注释
 
         var deps = [];
         var matched;
 
-        while ((matched = REG_NUNJUCKS_EXTENDS.exec(contents)) !== null) {
+        /* eslint-disable no-cond-assign */
+        while ((matched = REG_NUNJUCKS_DEPS.exec(contents)) !== null) {
             deps.push(matched[1]);
+        }
+
+        if (fpath.indexOf('/m.qidian.com/homepage/_layout.html') > -1) {
+            console.log(deps); // eslint-disable-line no-console
         }
 
         return deps;
@@ -100,19 +102,20 @@ module.exports = function (dest, options) {
      * @return {Array<String>} 依赖文件数组(由文件的绝对地址组成)
      */
     function getFileDeps(file) {
-        var dirname = path.dirname(file.path)
+        var dirname = path.dirname(file.path);
         var extname = path.extname(file.path);
 
         var ext = extname.slice(1).toLowerCase();
 
-        var getContentsDeps = options.getContentsDeps || allGetContentsDeps[options] || allGetContentsDeps[ext];
+        var getContentsDeps = options.getContentsDeps || allGetContentsDeps[options.syntax] ||
+            allGetContentsDeps[ext];
 
         if (!getContentsDeps) {
             return [];
         }
 
         var contents = file.contents.toString('utf-8');
-        var deps = getContentsDeps(contents);
+        var deps = getContentsDeps(contents, file.path);
 
         return deps.map(function (dep) {
             var depFilePath = path.resolve(options.base || dirname, dep);
@@ -131,6 +134,8 @@ module.exports = function (dest, options) {
 
         fileObj.File = file;
         fileObj.deps = {};
+
+        // console.log(file.path.split('views')[1], getFileDeps(file).map(d => d.split('views')[1])); // eslint-disable-line no-console
 
         getFileDeps(file).forEach(function (depFilePath) {
             fileObj.deps[depFilePath] = fileObjs[depFilePath] || (fileObjs[depFilePath] = {});
@@ -160,14 +165,19 @@ module.exports = function (dest, options) {
         Object.keys(fileObjs).forEach(function (filePath) {
             var fileObj = fileObjs[filePath];
 
+            if (!fileObj.File) {
+                gutil.log('Not Found', gutil.colors.red(filePath));
+                return;
+            }
+
             if (fileObj.isNew) {
                 if (options.underscore || path.basename(filePath).indexOf('_') !== 0) {
                     stream.push(fileObj.File);
-                    gutil.log('文件 "' + filePath + '" 将被更改');
+                    // gutil.log('New File', gutil.colors.green(filePath));
                 }
             } else if (getLastModified(fileObj) > fileObj.targetLastModified) {
                 stream.push(fileObj.File);
-                gutil.log('文件 "' + filePath + '" 将被更改');
+                gutil.log(gutil.colors.red('Changed'), gutil.colors.blue(filePath));
             }
         });
 
@@ -177,5 +187,3 @@ module.exports = function (dest, options) {
 
     return through2.obj(transform, flush);
 };
-
-module.exports.allGetContentsDeps = allGetContentsDeps;

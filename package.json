@@ -9,7 +9,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "es6-promise": "^4.0.5",
     "gulp-util": "^3.0.7",
     "through2": "^2.0.1"
   },
