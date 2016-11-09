@@ -38,10 +38,6 @@ var allGetContentsDeps = {
             deps.push(matched[1]);
         }
 
-        if (fpath.indexOf('/m.qidian.com/homepage/_layout.html') > -1) {
-            console.log(deps); // eslint-disable-line no-console
-        }
-
         return deps;
     },
 };
